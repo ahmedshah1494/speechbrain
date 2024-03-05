@@ -18,7 +18,7 @@ from speechbrain.utils.autocast import fwd_default_precision
 from speechbrain.nnet.CNN import GaborConv1d
 from speechbrain.nnet.normalization import PCEN
 from speechbrain.nnet.pooling import GaussianLowpassPooling
-
+import chcochleagram as cochleagram_feather
 
 class Fbank(torch.nn.Module):
     """Generate features for input to the speech pipeline.
@@ -148,6 +148,102 @@ class Fbank(torch.nn.Module):
             fbanks = self.context_window(fbanks)
         return fbanks
 
+class Spectrogram(torch.nn.Module):
+    """Generate features for input to the speech pipeline.
+
+    Arguments
+    ---------
+    deltas : bool (default: False)
+        Whether or not to append derivatives and second derivatives
+        to the features.
+    context : bool (default: False)
+        Whether or not to append forward and backward contexts to
+        the features.
+    requires_grad : bool (default: False)
+        Whether to allow parameters (i.e. fbank centers and
+        spreads) to update during training.
+    sample_rate : int (default: 160000)
+        Sampling rate for the input waveforms.
+    f_min : int (default: 0)
+        Lowest frequency for the Mel filters.
+    f_max : int (default: None)
+        Highest frequency for the Mel filters. Note that if f_max is not
+        specified it will be set to sample_rate // 2.
+    win_length : float (default: 25)
+        Length (in ms) of the sliding window used to compute the STFT.
+    hop_length : float (default: 10)
+        Length (in ms) of the hop of the sliding window used to compute
+        the STFT.
+    n_fft : int (default: 400)
+        Number of samples to use in each stft.
+    left_frames : int (default: 5)
+        Number of frames of left context to add.
+    right_frames : int (default: 5)
+        Number of frames of right context to add.
+
+    Example
+    -------
+    >>> import torch
+    >>> inputs = torch.randn([10, 16000])
+    >>> feature_maker = Fbank()
+    >>> feats = feature_maker(inputs)
+    >>> feats.shape
+    torch.Size([10, 101, 40])
+    """
+
+    def __init__(
+        self,
+        deltas=False,
+        context=False,
+        requires_grad=False,
+        sample_rate=16000,
+        f_min=0,
+        f_max=None,
+        n_fft=400,
+        left_frames=5,
+        right_frames=5,
+        win_length=25,
+        hop_length=10,
+        log=True
+    ):
+        super().__init__()
+        self.deltas = deltas
+        self.context = context
+        self.requires_grad = requires_grad
+
+        if f_max is None:
+            f_max = sample_rate / 2
+
+        self.compute_STFT = STFT(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            win_length=win_length,
+            hop_length=hop_length,
+        )
+        self.compute_deltas = Deltas(input_size=n_fft//2 + 1)
+        self.context_window = ContextWindow(
+            left_frames=left_frames, right_frames=right_frames,
+        )
+        self.log = log
+
+    @fwd_default_precision(cast_inputs=torch.float32)
+    def forward(self, wav):
+        """Returns a set of features generated from the input waveforms.
+
+        Arguments
+        ---------
+        wav : tensor
+            A batch of audio signals to transform to features.
+        """
+        STFT = self.compute_STFT(wav)
+        mag = spectral_magnitude(STFT, log=self.log)
+        if self.deltas:
+            delta1 = self.compute_deltas(mag)
+            delta2 = self.compute_deltas(delta1)
+            mag = torch.cat([mag, delta1, delta2], dim=2)
+        if self.context:
+            mag = self.context_window(mag)
+        return mag
 
 class MFCC(torch.nn.Module):
     """Generate features for input to the speech pipeline.
@@ -441,3 +537,39 @@ class Leaf(torch.nn.Module):
                 "Leaf expects 2d or 3d inputs. Got " + str(len(shape))
             )
         return in_channels
+
+class CochleagramFeather(cochleagram_feather.audio_transforms_cochleagram.AudioToCochleagram):
+    winsize = 4000
+    default_kwargs = {'rep_type': 'cochleagram',
+                'signal_size':winsize,
+                'sr':16000,
+                'env_sr': 200,
+                'pad_factor':None,
+                'use_rfft':True,
+                'coch_filter_type': cochleagram_feather.cochlear_filters.ERBCosFilters,
+                'coch_filter_kwargs': {
+                    'n':50,
+                    'low_lim':50,
+                    'high_lim':8000,
+                    'sample_factor':2,
+                    'full_filter':False,
+                    },
+                'env_extraction_type': cochleagram_feather.envelope_extraction.HilbertEnvelopeExtraction,
+                'downsampling_type': cochleagram_feather.downsampling.SincWithKaiserWindow,
+                'downsampling_kwargs': {
+                    'window_size':winsize//32},
+                 'compression_type': cochleagram_feather.compression.ClippedGradPowerCompression,
+                 'compression_kwargs': {'scale': 1,
+                                        'offset':1e-8,
+                                        'clip_value': 5, # This wil clip cochleagram values < ~0.04
+                                        'power': 0.3},
+                'cochleagram_cls': cochleagram_feather.cochleagram.ArbitraryLengthCochleagram
+                }
+
+    def __init__(self, **kwargs):
+        cgram_kwargs = self.default_kwargs.copy()
+        cgram_kwargs.update(kwargs)
+        super(CochleagramFeather, self).__init__(cgram_kwargs)
+
+    def forward(self, x):
+        return super(CochleagramFeather, self).forward(x).permute(0,2,1)
