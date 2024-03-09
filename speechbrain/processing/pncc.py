@@ -53,7 +53,7 @@ def asymmetric_noise_suppression_with_temporal_masking(Qin, lm_a, lm_b, lm_t, mu
     return R
 
 def weight_smoothing(
-    R: torch.Tensor, Q: torch.Tensor, N: int = 4) -> torch.Tensor:
+    R: torch.Tensor, Q: torch.Tensor, N: int = 4, eps: float = 1e-8) -> torch.Tensor:
     """
     Apply spectral weight smoothing according to [Kim]_.
 
@@ -83,7 +83,7 @@ def weight_smoothing(
     Q_ = torch.nn.functional.pad(Q, (N, N), mode='constant', value=1e-8)
     Q_ = Q_.unfold(2, 2*N+1, 1)
 
-    S = R_ / Q_
+    S = R_ / (Q_ + eps)
     S = S.sum(3) / D
     return S
 
@@ -93,14 +93,14 @@ def mean_power_normalization(T, lm_mu=0.999, k=1):
     """
     L = T.shape[2]
     N = T.shape[1]
-    mu = torch.zeros(T.shape[0], T.shape[1], 1, dtype=T.dtype, device=T.device)
+    mu = torch.zeros(T.shape[0], T.shape[1], dtype=T.dtype, device=T.device)
     mu[:,0] = 0.0001
 
     T_favg = T.mean(2)
     for m in range(1, N):
         mu[:, m] = lm_mu * mu[:, m-1] + (1-lm_mu) * T_favg[:, m]
     
-    U = k * T / mu
+    U = k * T / mu.unsqueeze(2)
     return U
 
 class PNCC(torch.nn.Module):
@@ -179,7 +179,7 @@ class PNCC(torch.nn.Module):
         x = self.preemphasize(x)
         spec = self.compute_STFT(x).transpose(1, 2)
         spec = spectral_magnitude(spec)
-        P = torch.matmul(spec.transpose(1, 2), self.fbank.T)
+        P = torch.matmul(spec.transpose(1, 2), self.fbank.T.to(x.device))
         Qt = medium_time_power(P, self.medium_time_power_window_size)
         Rt = asymmetric_noise_suppression_with_temporal_masking(
             P, self.lm_a, self.lm_b, self.lm_t, self.mu_t, self.c
@@ -194,6 +194,6 @@ class PNCC(torch.nn.Module):
             cepstral = self.dct(V)
             if self.normalize_ceps:
                 cepstral = (cepstral - cepstral.mean(1, keepdim=True)) / cepstral.std(1, keepdim=True)
-            return cepstral[..., :self.n_ceps]
+            return cepstral
         else:
             return V
