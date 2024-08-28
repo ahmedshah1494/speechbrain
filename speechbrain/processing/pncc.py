@@ -24,9 +24,21 @@ def assymetric_lowpass_filtering(Qin, lm_a, lm_b, lm_0):
     Qout = torch.zeros_like(Qin, dtype=Qin.dtype, device=Qin.device)
     Qout[:, 0] = lm_0 * Qin[:, 0]
     for m in range(Qin.size(1)):
-        Q1 = lm_a * Qout[:, m-1] + (1-lm_a) * Qin[:, m]
-        Q2 = lm_b * Qout[:, m-1] + (1-lm_b) * Qin[:, m]
-        Qout[:, m] = torch.where(Qin[:, m] > Qout[:, m-1], Q1, Q2)
+        # idx = Qin[:, m] > Qout[:, m-1]
+        # Qout_ = Qout[:, m][idx]
+        # Qin_ = Qin[:, m][idx]
+        # Qout[:, m][idx] = lm_a * Qout_ + (1-lm_a) * Qin_
+
+        # Qout_ = Qout[:, m][~idx]
+        # Qin_ = Qin[:, m][~idx]
+        # Qout[:, m][idx] = lm_b * Qout_ + (1-lm_b) * Qin_
+
+        coeffs = torch.where(Qin[:, m] > Qout[:, m-1], lm_a, lm_b)
+        Qout[:, m] = coeffs * Qout[:, m-1] + (1-coeffs) * Qin[:, m]
+
+        # Q1 = lm_a * Qout[:, m-1] + (1-lm_a) * Qin[:, m]
+        # Q2 = lm_b * Qout[:, m-1] + (1-lm_b) * Qin[:, m]
+        # Qout[:, m] = torch.where(Qin[:, m] > Qout[:, m-1], Q1, Q2)
     return Qout
 
 def temporal_masking(Q0, lm_t=0.85, mu_t=0.2):
@@ -35,13 +47,32 @@ def temporal_masking(Q0, lm_t=0.85, mu_t=0.2):
 
     Qp[:, 0] = Q0[:, 0]
     Rsp[:, 0] = Q0[:, 0]
-    for m in range(1, Q0.shape[1]):
-        Qp[:, m] = torch.maximum(lm_t * Qp[:, m-1], Q0[:, m])
-        Rsp[:, m] = torch.where(
-            Q0[:, m] >= lm_t * Qp[:, m - 1],
-            Q0[:, m],
-            mu_t * Qp[:, m-1]
-        )
+
+    N = Q0.shape[1]
+    lm_pow_row = lm_t ** torch.arange(N, dtype=Q0.dtype, device=Q0.device)
+    # print(lm_pow_row[:10])
+    lm_pows = torch.zeros(1, N, N, dtype=Q0.dtype, device=Q0.device)
+    for i in range(1,N+1):
+        lm_pows[:, i-1, :i] = lm_pow_row[:i].flip(0)
+    # print(lm_pows[0, :5, :5])
+    Qp = (Q0).unsqueeze(1).expand(-1, N, -1, -1)
+    Qp = Qp * lm_pows.unsqueeze(-1)
+    # Qp_sm = (torch.softmax(Qp, 2) * Qp).sum(2)
+    Qp_max = Qp.max(2).values
+    Qp = Qp_max#.detach() + Qp_sm - Qp_sm.detach()
+    # print(Qp.shape)
+    # print(Qp[0,:5, :5])
+    # for m in range(1, Q0.shape[1]):
+    #     Qp[:, m] = torch.maximum(lm_t * Qp[:, m-1], Q0[:, m])
+        # Rsp[:, m] = torch.where(
+        #     Q0[:, m] >= lm_t * Qp[:, m - 1],
+        #     Q0[:, m],
+        #     mu_t * Qp[:, m-1]
+        # )
+    # print(Qp[0,:5, :5])
+    Q0 = Q0[:, 1:]
+    Qp = Qp[:, :-1]
+    Rsp[:, 1:] = torch.where(Q0 >= lm_t * Qp, Q0, mu_t * Qp)
     return Rsp
 
 def asymmetric_noise_suppression_with_temporal_masking(Qin, lm_a, lm_b, lm_t, mu_t, c):
@@ -87,6 +118,19 @@ def weight_smoothing(
     S = S.sum(3) / D
     return S
 
+def _running_mean(A, lm, mu0):
+    N = A.shape[1]
+
+    A = A.unsqueeze(1).expand(-1, N, -1)
+    lm_pows = torch.tensor([(lm**(i-1)) for i in range(1,N+1)], dtype=A.dtype, device=A.device)
+    coeffs = lm_pows*(1-lm)
+    coeffs = coeffs.reshape(1,1,-1).expand(A.shape[0], N, N)
+    coeffs = torch.tril(coeffs)
+    mu = (A * coeffs).sum(2)
+    mu = mu + lm_pows.reshape(1,-1) * mu0
+
+    return mu
+
 def mean_power_normalization(T, lm_mu=0.999, k=1):
     """
     Apply mean power normalization to a signal
@@ -97,8 +141,19 @@ def mean_power_normalization(T, lm_mu=0.999, k=1):
     mu[:,0] = 0.0001
 
     T_favg = T.mean(2)
-    for m in range(1, N):
-        mu[:, m] = lm_mu * mu[:, m-1] + (1-lm_mu) * T_favg[:, m]
+    # for m in range(1, N):
+    #     mu[:, m] = lm_mu * mu[:, m-1] + (1-lm_mu) * T_favg[:, m]
+
+    mu[:, 1:] = _running_mean(T_favg[:, 1:], lm_mu, mu[:, [0]])
+
+    # T_favg = T_favg[:, 1:].unsqueeze(1).expand(-1, N-1, -1)
+    # lm_pows = torch.tensor([(lm_mu**(i-1)) for i in range(1,N)], dtype=T.dtype, device=T.device)
+    # coeffs = lm_pows*(1-lm_mu)
+    # coeffs = coeffs.reshape(1,1,-1).expand(T_favg.shape[0], N-1, N-1)
+    # coeffs = torch.tril(coeffs)
+    # mu[:, 1:] = (T_favg * coeffs).sum(2)
+    # mu[:, 1:] = mu[:, 1:] + lm_pows.reshape(1,-1) * mu[:, [0]]
+    
     
     U = k * T / mu.unsqueeze(2)
     return U
