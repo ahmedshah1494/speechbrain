@@ -9,7 +9,7 @@
 # ############################################################################
 # Seed needs to be set at top of yaml, before objects with parameters are made
 
-seed: 7775
+seed: 79351
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder_root: results
 output_folder: !ref <output_folder_root>/conformer_small_cochleagram/<seed>
@@ -26,7 +26,7 @@ train_log: !ref <output_folder>/train_log.txt
 pretrained_lm_tokenizer_path: speechbrain/asr-transformer-transformerlm-librispeech
 
 # Data files
-data_folder: !PLACEHOLDER  # e.g., /path/to/LibriSpeech
+data_folder: data  # e.g., /path/to/LibriSpeech
 # If RIRS_NOISES dir exists in /localscratch/xxx_corpus/RIRS_NOISES
 # then data_folder_rirs should be /localscratch/xxx_corpus
 # otherwise the dataset will automatically be downloaded

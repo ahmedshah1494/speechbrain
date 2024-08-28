@@ -12,7 +12,7 @@
 seed: 3407
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder_root: !ref results
-output_folder: !ref <output_folder_root>/conformer_large/<seed>
+output_folder: !ref <output_folder_root>/conformer_large_diffgamspec/<seed>
 output_wer_folder: !ref <output_folder>/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -35,12 +35,12 @@ train_splits: ["train-clean-100", "train-clean-360", "train-other-500"]
 dev_splits: ["dev-clean"]
 test_splits: ["dev-clean", "test-clean", "test-other"]
 skip_prep: False
-train_csv: !ref <output_folder>/train.csv
-valid_csv: !ref <output_folder>/dev-clean.csv
+train_csv: !ref <data_folder>/train.csv
+valid_csv: !ref <data_folder>/dev-clean.csv
 test_csv:
-    - !ref <output_folder>/dev-clean.csv
-    - !ref <output_folder>/test-clean.csv
-    - !ref <output_folder>/test-other.csv
+    - !ref <data_folder>/dev-clean.csv
+    - !ref <data_folder>/test-clean.csv
+    - !ref <data_folder>/test-other.csv
 
 ####################### Training Parameters ####################################
 
@@ -64,8 +64,8 @@ lr_adam: 0.0008
 
 # Feature parameters
 sample_rate: 16000
-n_fft: 512
-n_mels: 80
+n_fft: 1024
+n_filts: 80
 win_length: 32
 
 # This setup works well for A100 80GB GPU, adapts it to your needs.
@@ -311,10 +311,10 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_drop>,
         !ref <time_warp>]
 
-compute_features: !new:speechbrain.lobes.features.Fbank
+compute_features: !new:speechbrain.processing.gammatone_fbanks.DifferenceOfGammatoneFbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
-    n_mels: !ref <n_mels>
+    n_filts: !ref <n_filts>
     win_length: !ref <win_length>
 
 ############################## Logging and Pretrainer ##########################

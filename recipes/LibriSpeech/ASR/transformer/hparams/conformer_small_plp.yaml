@@ -9,10 +9,10 @@
 # ############################################################################
 # Seed needs to be set at top of yaml, before objects with parameters are made
 
-seed: 3407
+seed: 7775
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder_root: !ref results
-output_folder: !ref <output_folder_root>/conformer_large/<seed>
+output_folder_root: results
+output_folder: !ref <output_folder_root>/conformer_small_plp/<seed>
 output_wer_folder: !ref <output_folder>/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -33,14 +33,14 @@ data_folder: !PLACEHOLDER  # e.g., /path/to/LibriSpeech
 # data_folder_rirs: !ref <data_folder>
 train_splits: ["train-clean-100", "train-clean-360", "train-other-500"]
 dev_splits: ["dev-clean"]
-test_splits: ["dev-clean", "test-clean", "test-other"]
+test_splits: ["test-clean", "test-other"]
 skip_prep: False
-train_csv: !ref <output_folder>/train.csv
-valid_csv: !ref <output_folder>/dev-clean.csv
+train_csv: !ref <data_folder>/train.csv
+valid_csv: !ref <data_folder>/dev-clean.csv
 test_csv:
-    - !ref <output_folder>/dev-clean.csv
-    - !ref <output_folder>/test-clean.csv
-    - !ref <output_folder>/test-other.csv
+    - !ref <data_folder>/dev-clean.csv
+    - !ref <data_folder>/test-clean.csv
+    - !ref <data_folder>/test-other.csv
 
 ####################### Training Parameters ####################################
 
@@ -48,10 +48,10 @@ test_csv:
 # The global batch size is computed as batch_size * n_gpus * grad_accumulation_factor.
 # Empirically, we found that this value should be >= 128.
 # Please, set your parameters accordingly.
-number_of_epochs: 120
+number_of_epochs: 110
 batch_size: 16 # This works for 2x GPUs with 32GB
 ctc_weight: 0.3
-grad_accumulation_factor: 1
+grad_accumulation_factor: 2
 max_grad_norm: 5.0
 loss_reduction: 'batchmean'
 sorting: random
@@ -60,23 +60,25 @@ precision: fp32 # bf16, fp16 or fp32
 avg_checkpoints: 10 # Number of checkpoints to average for evaluation
 
 # stages related parameters
-lr_adam: 0.0008
+# stage_one_epochs: 90
+lr_adam: 0.001
+# lr_sgd: 0.000025
 
 # Feature parameters
 sample_rate: 16000
-n_fft: 512
-n_mels: 80
-win_length: 32
+n_fft: 400
+n_filts: 24
+n_ceps: 13
 
-# This setup works well for A100 80GB GPU, adapts it to your needs.
+# This setup works well for V100 32GB GPU, adapts it to your needs.
 # Or turn it off (but training speed will decrease)
 dynamic_batching: True
-max_batch_length_train: 500
+max_batch_length_train: 900
 max_batch_length_val: 100 # we reduce it as the beam is much wider (VRAM)
 num_bucket: 200
 shuffle: True # if true re-creates batches at each epoch shuffling examples.
 batch_ordering: random
-max_batch_ex: 256
+max_batch_ex: 128
 
 dynamic_batch_sampler_train:
     max_batch_length: !ref <max_batch_length_train>
@@ -107,18 +109,18 @@ test_dataloader_opts:
 ####################### Model Parameters #######################################
 
 # Transformer
-d_model: 512
-nhead: 8
+d_model: 144
+nhead: 4
 num_encoder_layers: 12
-num_decoder_layers: 6
-d_ffn: 2048
+num_decoder_layers: 4
+d_ffn: 1024
 transformer_dropout: 0.1
 activation: !name:torch.nn.GELU
 output_neurons: 5000
 
 # Outputs
 blank_index: 0
-label_smoothing: 0.1
+label_smoothing: 0.0
 pad_index: 0
 bos_index: 1
 eos_index: 2
@@ -135,7 +137,7 @@ ctc_weight_decode: 0.40
 ############################## Models ##########################################
 
 CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
-    input_shape: (8, 10, 80)
+    input_shape: !ref (8, 10, <n_ceps>)
     num_blocks: 2
     num_layers_per_block: 1
     out_channels: (64, 32)
@@ -144,7 +146,7 @@ CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
     residuals: (False, False)
 
 Transformer: !new:speechbrain.lobes.models.transformer.TransformerASR.TransformerASR # yamllint disable-line rule:line-length
-    input_size: 640
+    input_size: 128
     tgt_vocab: !ref <output_neurons>
     d_model: !ref <d_model>
     nhead: !ref <nhead>
@@ -194,16 +196,16 @@ modules:
     ctc_lin: !ref <ctc_lin>
     normalize: !ref <normalize>
 
+model: !new:torch.nn.ModuleList
+    - [!ref <CNN>, !ref <Transformer>, !ref <seq_lin>, !ref <ctc_lin>]
+
 # define two optimizers here for two-stage training
-Adam: !name:torch.optim.AdamW
+Adam: !name:torch.optim.Adam
     lr: !ref <lr_adam>
     betas: (0.9, 0.98)
     eps: 0.000000001
 
-model: !new:torch.nn.ModuleList
-    - [!ref <CNN>, !ref <Transformer>, !ref <seq_lin>, !ref <ctc_lin>]
-
-####################### Decoding & optimiser ###########################
+############################## Decoding & optimiser ############################
 
 ctc_scorer: !new:speechbrain.decoders.scorer.CTCScorer
     eos_index: !ref <eos_index>
@@ -249,6 +251,7 @@ test_search: !new:speechbrain.decoders.S2STransformerBeamSearcher
     length_normalization: True
     scorer: !ref <scorer_test_search>
 
+
 log_softmax: !new:torch.nn.LogSoftmax
     dim: -1
 
@@ -262,7 +265,7 @@ seq_cost: !name:speechbrain.nnet.losses.kldiv_loss
 
 noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr_adam>
-    n_warmup_steps: 30000
+    n_warmup_steps: 25000
 
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
     checkpoints_dir: !ref <save_folder>
@@ -311,11 +314,13 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_drop>,
         !ref <time_warp>]
 
-compute_features: !new:speechbrain.lobes.features.Fbank
+compute_features: !new:speechbrain.processing.plp.PLP
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
-    n_mels: !ref <n_mels>
-    win_length: !ref <win_length>
+    n_filts: !ref <n_filts>
+    order: !ref <n_ceps>
+    normalize: True
+
 
 ############################## Logging and Pretrainer ##########################
 

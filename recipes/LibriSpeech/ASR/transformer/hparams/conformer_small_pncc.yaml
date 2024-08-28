@@ -67,7 +67,7 @@ lr_adam: 0.001
 # Feature parameters
 sample_rate: 16000
 n_fft: 1024
-n_filt: 40
+n_filts: 40
 n_ceps: 24
 
 # This setup works well for V100 32GB GPU, adapts it to your needs.
@@ -137,7 +137,7 @@ ctc_weight_decode: 0.40
 ############################## Models ##########################################
 
 CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
-    input_shape: !ref (8, 10, <n_mfcc>)
+    input_shape: !ref (8, 10, <n_ceps>)
     num_blocks: 2
     num_layers_per_block: 1
     out_channels: (64, 32)
@@ -317,9 +317,8 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
 compute_features: !new:speechbrain.processing.pncc.PNCC
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
-    n_filt: !ref <n_filt>
+    n_filts: !ref <n_filts>
     n_ceps: !ref <n_ceps>
-    normalize_ceps: True
 
 
 ############################## Logging and Pretrainer ##########################
