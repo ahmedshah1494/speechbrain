@@ -42,9 +42,9 @@ _DESCRIPTION = """\
 Language modeling resources to be used in conjunction with the LibriSpeech ASR corpus.
 """
 
-_URL = "http://www.openslr.org/94"
+_URL = "http://www.openslr.org/11"
 
-_DL_URL = "https://dl.fbaipublicfiles.com/mls/mls_lm_spanish.tar.gz"
+_DL_URL = "http://www.openslr.org/resources/11/librispeech-lm-norm.txt.gz"
 
 
 class LibrispeechLmConfig(datasets.BuilderConfig):

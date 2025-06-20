@@ -12,7 +12,7 @@
 seed: 3407
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder_root: !ref results
-output_folder: !ref <output_folder_root>/branchformer_large/<seed>
+output_folder: !ref <output_folder_root>/branchformer_large_diffgamspec/<seed>
 output_wer_folder: !ref <output_folder>/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -67,8 +67,8 @@ weight_decay: 0.01
 
 # Feature parameters
 sample_rate: 16000
-n_fft: 512
-n_mels: 80
+n_fft: 1024
+n_filts: 80
 win_length: 32
 
 # This setup works well for A100 80GB GPU, adapts it to your needs.
@@ -316,11 +316,11 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_drop>,
         !ref <time_warp>]
 
-compute_features: !new:speechbrain.lobes.features.Fbank
+compute_features: !new:speechbrain.processing.gammatone_fbanks.DifferenceOfGammatoneFbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
     win_length: !ref <win_length>
-    n_mels: !ref <n_mels>
+    n_filts: !ref <n_filts>
 
 ############################## Logging and Pretrainer ##########################
 

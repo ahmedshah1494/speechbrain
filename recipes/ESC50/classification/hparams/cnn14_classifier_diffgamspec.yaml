@@ -18,7 +18,7 @@ data_folder: !PLACEHOLDER # e.g., /localscratch/ESC-50-master
 audio_data_folder: !ref <data_folder>/audio
 
 output_folder_root: results
-experiment_name: cnn14-esc50
+experiment_name: cnn14_diffgamspec-esc50
 output_folder: !ref <output_folder_root>/<experiment_name>/<seed>
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -105,10 +105,17 @@ compute_stft: !new:speechbrain.processing.features.STFT
     win_length: !ref <win_length>
     sample_rate: !ref <sample_rate>
 
-compute_fbank: !new:speechbrain.processing.features.Filterbank
-    n_mels: 80
-    n_fft: !ref <n_fft>
+# compute_fbank: !new:speechbrain.processing.features.Filterbank
+#     n_mels: 80
+#     n_fft: !ref <n_fft>
+#     sample_rate: !ref <sample_rate>
+
+compute_fbank: !new:speechbrain.processing.gammatone_fbanks.DifferenceOfGammatoneFbank
     sample_rate: !ref <sample_rate>
+    n_fft: !ref <n_fft>
+    hop_length: !ref <hop_length>
+    win_length: !ref <win_length>
+    n_filts: 80
 
 modules:
     compute_stft: !ref <compute_stft>

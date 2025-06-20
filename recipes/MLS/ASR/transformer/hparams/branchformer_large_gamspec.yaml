@@ -12,7 +12,7 @@
 seed: 3407
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 output_folder_root: !ref results
-output_folder: !ref <output_folder_root>/branchformer_large/<seed>
+output_folder: !ref <output_folder_root>/branchformer_large_gamspec/<seed>
 output_wer_folder: !ref <output_folder>/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -23,7 +23,8 @@ train_log: !ref <output_folder>/train_log.txt
 # speechbrain HuggingFace repository. However, a local path pointing to a
 # directory containing the lm.ckpt and tokenizer.ckpt may also be specified
 # instead. E.g if you want to use your own LM / tokenizer.
-pretrained_lm_tokenizer_path: speechbrain/asr-transformer-transformerlm-librispeech
+# pretrained_lm_tokenizer_path: speechbrain/asr-transformer-transformerlm-librispeech
+pretrained_tokenizer_file: <output_folder_root>/tokenizers/5K_subword_unigram_960h_LM/5000_unigram.model
 
 # Data files
 data_folder: data  # e.g., /path/to/LibriSpeech
@@ -31,16 +32,15 @@ data_folder: data  # e.g., /path/to/LibriSpeech
 # then data_folder_rirs should be /localscratch/xxx_corpus
 # otherwise the dataset will automatically be downloaded
 # data_folder_rirs: !ref <data_folder>
-train_splits: ["train-clean-100", "train-clean-360", "train-other-500"]
-dev_splits: ["dev-clean"]
-test_splits: ["dev-clean", "test-clean", "test-other"]
+train_splits: ["train"]
+dev_splits: ["dev"]
+test_splits: ["dev", "test"]
 skip_prep: False
 train_csv: !ref <output_folder>/train.csv
-valid_csv: !ref <output_folder>/dev-clean.csv
+valid_csv: !ref <output_folder>/dev.csv
 test_csv:
-    - !ref <output_folder>/dev-clean.csv
-    - !ref <output_folder>/test-clean.csv
-    - !ref <output_folder>/test-other.csv
+    - !ref <output_folder>/dev.csv
+    - !ref <output_folder>/test.csv
 
 ####################### Training Parameters ####################################
 
@@ -68,7 +68,7 @@ weight_decay: 0.01
 # Feature parameters
 sample_rate: 16000
 n_fft: 512
-n_mels: 80
+n_filts: 80
 win_length: 32
 
 # This setup works well for A100 80GB GPU, adapts it to your needs.
@@ -167,16 +167,16 @@ Transformer: !new:speechbrain.lobes.models.transformer.TransformerASR.Transforme
 # Visit the HuggingFace model corresponding to the pretrained_lm_tokenizer_path
 # For more details about the model!
 # NB: It has to match the pre-trained TransformerLM!!
-lm_model: !new:speechbrain.lobes.models.transformer.TransformerLM.TransformerLM # yamllint disable-line rule:line-length
-    vocab: !ref <output_neurons>
-    d_model: 768
-    nhead: 12
-    num_encoder_layers: 12
-    num_decoder_layers: 0
-    d_ffn: 3072
-    dropout: 0.0
-    activation: !name:torch.nn.GELU
-    normalize_before: False
+# lm_model: !new:speechbrain.lobes.models.transformer.TransformerLM.TransformerLM # yamllint disable-line rule:line-length
+#     vocab: !ref <output_neurons>
+#     d_model: 768
+#     nhead: 12
+#     num_encoder_layers: 12
+#     num_decoder_layers: 0
+#     d_ffn: 3072
+#     dropout: 0.0
+#     activation: !name:torch.nn.GELU
+#     normalize_before: False
 
 tokenizer: !new:sentencepiece.SentencePieceProcessor
 
@@ -216,20 +216,28 @@ ctc_scorer: !new:speechbrain.decoders.scorer.CTCScorer
     ctc_fc: !ref <ctc_lin>
 
 
-transformerlm_scorer: !new:speechbrain.decoders.scorer.TransformerLMScorer
-    language_model: !ref <lm_model>
-    temperature: 1.15
+# transformerlm_scorer: !new:speechbrain.decoders.scorer.TransformerLMScorer
+#     language_model: !ref <lm_model>
+#     temperature: 1.15
 
-scorer_valid_search: !new:speechbrain.decoders.scorer.ScorerBuilder
+# scorer_valid_search: !new:speechbrain.decoders.scorer.ScorerBuilder
+#     full_scorers: [!ref <ctc_scorer>]
+#     weights:
+#         ctc: !ref <ctc_weight_decode>
+
+# scorer_test_search: !new:speechbrain.decoders.scorer.ScorerBuilder
+#     full_scorers: [!ref <transformerlm_scorer>, !ref <ctc_scorer>]
+#     weights:
+#         ctc: !ref <ctc_weight_decode>
+#         transformerlm: !ref <lm_weight>
+
+scorer: !new:speechbrain.decoders.scorer.ScorerBuilder
     full_scorers: [!ref <ctc_scorer>]
     weights:
         ctc: !ref <ctc_weight_decode>
 
-scorer_test_search: !new:speechbrain.decoders.scorer.ScorerBuilder
-    full_scorers: [!ref <transformerlm_scorer>, !ref <ctc_scorer>]
-    weights:
-        ctc: !ref <ctc_weight_decode>
-        transformerlm: !ref <lm_weight>
+scorer_test_search: !ref <scorer>
+scorer_valid_search: !ref <scorer>
 
 valid_search: !new:speechbrain.decoders.S2STransformerBeamSearcher
     modules: [!ref <Transformer>, !ref <seq_lin>]
@@ -316,11 +324,11 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_drop>,
         !ref <time_warp>]
 
-compute_features: !new:speechbrain.lobes.features.Fbank
+compute_features: !new:speechbrain.processing.gammatone_fbanks.GammatoneFbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
     win_length: !ref <win_length>
-    n_mels: !ref <n_mels>
+    n_filts: !ref <n_filts>
 
 ############################## Logging and Pretrainer ##########################
 
@@ -337,8 +345,8 @@ acc_computer: !name:speechbrain.utils.Accuracy.AccuracyStats
 pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer
     collect_in: !ref <save_folder>
     loadables:
-        lm: !ref <lm_model>
+        # lm: !ref <lm_model>
         tokenizer: !ref <tokenizer>
     paths:
-        lm: !ref <pretrained_lm_tokenizer_path>/lm.ckpt
-        tokenizer: !ref <pretrained_lm_tokenizer_path>/tokenizer.ckpt
+        # lm: !ref <pretrained_lm_tokenizer_path>/lm.ckpt
+        tokenizer: !ref <pretrained_tokenizer_file> # <pretrained_lm_tokenizer_path>/tokenizer.ckpt

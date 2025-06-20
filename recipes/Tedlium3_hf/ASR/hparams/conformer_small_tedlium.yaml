@@ -1,18 +1,18 @@
 # ############################################################################
 # Model: E2E ASR with Transformer
-# Encoder: Branchformer Encoder
+# Encoder: Conformer Encoder
 # Decoder: Transformer Decoder + (CTC/ATT joint) beamsearch + TransformerLM
 # Tokens: unigram
 # losses: CTC + KLdiv (Label Smoothing loss)
 # Training: Librispeech 960h
-# Authors:  Titouan Parcollet
+# Authors:  Jianyuan Zhong, Titouan Parcollet, Samuele Cornell
 # ############################################################################
 # Seed needs to be set at top of yaml, before objects with parameters are made
 
-seed: 3407
+seed: 7775
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder_root: !ref results
-output_folder: !ref <output_folder_root>/branchformer_large/<seed>
+output_folder_root: results
+output_folder: !ref <output_folder_root>/conformer_small_tedlium/<seed>
 output_wer_folder: !ref <output_folder>/
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -23,7 +23,7 @@ train_log: !ref <output_folder>/train_log.txt
 # speechbrain HuggingFace repository. However, a local path pointing to a
 # directory containing the lm.ckpt and tokenizer.ckpt may also be specified
 # instead. E.g if you want to use your own LM / tokenizer.
-pretrained_lm_tokenizer_path: speechbrain/asr-transformer-transformerlm-librispeech
+pretrained_lm_tokenizer_path: <output_folder_root>/tokenizers/500_bpe_Tedlium3/500_bpe.model
 
 # Data files
 data_folder: data  # e.g., /path/to/LibriSpeech
@@ -31,25 +31,22 @@ data_folder: data  # e.g., /path/to/LibriSpeech
 # then data_folder_rirs should be /localscratch/xxx_corpus
 # otherwise the dataset will automatically be downloaded
 # data_folder_rirs: !ref <data_folder>
-train_splits: ["train-clean-100", "train-clean-360", "train-other-500"]
-dev_splits: ["dev-clean"]
-test_splits: ["dev-clean", "test-clean", "test-other"]
+train_splits: ["train"]
+dev_splits: ["validation"]
+test_splits: ["test"]
 skip_prep: False
 train_csv: !ref <output_folder>/train.csv
-valid_csv: !ref <output_folder>/dev-clean.csv
-test_csv:
-    - !ref <output_folder>/dev-clean.csv
-    - !ref <output_folder>/test-clean.csv
-    - !ref <output_folder>/test-other.csv
+valid_csv: !ref <output_folder>/validation.csv
+test_csv: 
+    - !ref <output_folder>/test.csv
 
 ####################### Training Parameters ####################################
 
 # To make Transformers converge, the global bath size should be large enough.
-# The global batch size is computed as batch_size * n_gpus *
-# grad_accumulation_factor.
+# The global batch size is computed as batch_size * n_gpus * grad_accumulation_factor.
 # Empirically, we found that this value should be >= 128.
 # Please, set your parameters accordingly.
-number_of_epochs: 120
+number_of_epochs: 110
 batch_size: 16 # This works for 2x GPUs with 32GB
 ctc_weight: 0.3
 grad_accumulation_factor: 1
@@ -62,24 +59,24 @@ avg_checkpoints: 10 # Number of checkpoints to average for evaluation
 
 # stages related parameters
 # stage_one_epochs: 90
-lr_adam: 0.0008
-weight_decay: 0.01
+lr_adam: 0.001
+# lr_sgd: 0.000025
 
 # Feature parameters
 sample_rate: 16000
-n_fft: 512
+n_fft: 400
 n_mels: 80
-win_length: 32
 
-# This setup works well for A100 80GB GPU, adapts it to your needs.
+# This setup works well for V100 32GB GPU, adapts it to your needs.
 # Or turn it off (but training speed will decrease)
 dynamic_batching: True
-max_batch_length_train: 500
+max_batch_length_train: 900
 max_batch_length_val: 100 # we reduce it as the beam is much wider (VRAM)
 num_bucket: 200
 shuffle: True # if true re-creates batches at each epoch shuffling examples.
-max_batch_ex: 128
 batch_ordering: random
+max_batch_ex: 128
+
 dynamic_batch_sampler_train:
     max_batch_length: !ref <max_batch_length_train>
     num_buckets: !ref <num_bucket>
@@ -109,19 +106,18 @@ test_dataloader_opts:
 ####################### Model Parameters #######################################
 
 # Transformer
-d_model: 512
-nhead: 8
-num_encoder_layers: 18
-num_decoder_layers: 6
-csgu_linear_units: 3072
-csgu_kernel_size: 31
+d_model: 144
+nhead: 4
+num_encoder_layers: 12
+num_decoder_layers: 4
+d_ffn: 1024
 transformer_dropout: 0.1
 activation: !name:torch.nn.GELU
 output_neurons: 5000
 
 # Outputs
 blank_index: 0
-label_smoothing: 0.1
+label_smoothing: 0.0
 pad_index: 0
 bos_index: 1
 eos_index: 2
@@ -132,8 +128,7 @@ max_decode_ratio: 1.0
 valid_search_interval: 10
 valid_beam_size: 10
 test_beam_size: 66
-lm_weight: 0.60
-ctc_weight_decode: 0.40
+ctc_weight_decode: 0.3
 
 ############################## Models ##########################################
 
@@ -153,30 +148,13 @@ Transformer: !new:speechbrain.lobes.models.transformer.TransformerASR.Transforme
     nhead: !ref <nhead>
     num_encoder_layers: !ref <num_encoder_layers>
     num_decoder_layers: !ref <num_decoder_layers>
+    d_ffn: !ref <d_ffn>
     dropout: !ref <transformer_dropout>
     activation: !ref <activation>
-    branchformer_activation: !ref <activation>
-    encoder_module: branchformer
-    csgu_linear_units: !ref <csgu_linear_units>
-    kernel_size: !ref <csgu_kernel_size>
+    encoder_module: conformer
     attention_type: RelPosMHAXL
     normalize_before: True
     causal: False
-
-# This is the TransformerLM that is used according to the Huggingface repository
-# Visit the HuggingFace model corresponding to the pretrained_lm_tokenizer_path
-# For more details about the model!
-# NB: It has to match the pre-trained TransformerLM!!
-lm_model: !new:speechbrain.lobes.models.transformer.TransformerLM.TransformerLM # yamllint disable-line rule:line-length
-    vocab: !ref <output_neurons>
-    d_model: 768
-    nhead: 12
-    num_encoder_layers: 12
-    num_decoder_layers: 0
-    d_ffn: 3072
-    dropout: 0.0
-    activation: !name:torch.nn.GELU
-    normalize_before: False
 
 tokenizer: !new:sentencepiece.SentencePieceProcessor
 
@@ -202,34 +180,28 @@ modules:
 model: !new:torch.nn.ModuleList
     - [!ref <CNN>, !ref <Transformer>, !ref <seq_lin>, !ref <ctc_lin>]
 
-Adam: !name:torch.optim.AdamW
+# define two optimizers here for two-stage training
+Adam: !name:torch.optim.Adam
     lr: !ref <lr_adam>
     betas: (0.9, 0.98)
     eps: 0.000000001
-    weight_decay: !ref <weight_decay>
 
-####################### Decoding & optimiser ###################################
+############################## Decoding & optimiser ############################
 
 ctc_scorer: !new:speechbrain.decoders.scorer.CTCScorer
     eos_index: !ref <eos_index>
     blank_index: !ref <blank_index>
     ctc_fc: !ref <ctc_lin>
 
-
-transformerlm_scorer: !new:speechbrain.decoders.scorer.TransformerLMScorer
-    language_model: !ref <lm_model>
-    temperature: 1.15
+scorer_test_search: !new:speechbrain.decoders.scorer.ScorerBuilder
+    full_scorers: [!ref <ctc_scorer>]
+    weights:
+        ctc: !ref <ctc_weight_decode>
 
 scorer_valid_search: !new:speechbrain.decoders.scorer.ScorerBuilder
     full_scorers: [!ref <ctc_scorer>]
     weights:
         ctc: !ref <ctc_weight_decode>
-
-scorer_test_search: !new:speechbrain.decoders.scorer.ScorerBuilder
-    full_scorers: [!ref <transformerlm_scorer>, !ref <ctc_scorer>]
-    weights:
-        ctc: !ref <ctc_weight_decode>
-        transformerlm: !ref <lm_weight>
 
 valid_search: !new:speechbrain.decoders.S2STransformerBeamSearcher
     modules: [!ref <Transformer>, !ref <seq_lin>]
@@ -254,6 +226,7 @@ test_search: !new:speechbrain.decoders.S2STransformerBeamSearcher
     length_normalization: True
     scorer: !ref <scorer_test_search>
 
+
 log_softmax: !new:torch.nn.LogSoftmax
     dim: -1
 
@@ -267,7 +240,7 @@ seq_cost: !name:speechbrain.nnet.losses.kldiv_loss
 
 noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr_adam>
-    n_warmup_steps: 30000
+    n_warmup_steps: 25000
 
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
     checkpoints_dir: !ref <save_folder>
@@ -280,7 +253,7 @@ checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
     limit: !ref <number_of_epochs>
 
-####################### Augmentations ###########################
+############################## Augmentations ###################################
 
 # Speed perturbation
 speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
@@ -289,23 +262,27 @@ speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
 
 # Time Drop
 time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 15
+    drop_length_low: 20
     drop_length_high: 25
-    drop_count_low: 4
-    drop_count_high: 4
+    drop_count_low: 7
+    drop_count_high: 7
     replace: "mean"
+    dim: 1
 
 # Freq Drop
 freq_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 10
-    drop_length_high: 20
-    drop_count_low: 4
-    drop_count_high: 4
+    drop_length_low: 25
+    drop_length_high: 30
+    drop_count_low: 2
+    drop_count_high: 2
     replace: "mean"
     dim: 2
 
 # Time warp
 time_warp: !new:speechbrain.augment.freq_domain.Warping
+    warp_window: 5
+    warp_mode: "bicubic"
+    dim: 1
 
 fea_augment: !new:speechbrain.augment.augmenter.Augmenter
     min_augmentations: 3
@@ -319,7 +296,6 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
 compute_features: !new:speechbrain.lobes.features.Fbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
-    win_length: !ref <win_length>
     n_mels: !ref <n_mels>
 
 ############################## Logging and Pretrainer ##########################
@@ -337,8 +313,6 @@ acc_computer: !name:speechbrain.utils.Accuracy.AccuracyStats
 pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer
     collect_in: !ref <save_folder>
     loadables:
-        lm: !ref <lm_model>
         tokenizer: !ref <tokenizer>
     paths:
-        lm: !ref <pretrained_lm_tokenizer_path>/lm.ckpt
-        tokenizer: !ref <pretrained_lm_tokenizer_path>/tokenizer.ckpt
+        tokenizer: !ref <pretrained_lm_tokenizer_path>
