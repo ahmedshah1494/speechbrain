@@ -91,6 +91,8 @@ class GammatoneFbank(torch.nn.Module):
         conversion_approach='Glasberg',
         normalize_fbank: bool = True,
         preemphasize: bool = True,
+        width: int = 1,
+        power: float = 0.3,
     ):
         super().__init__()
         self.sample_rate = sample_rate
@@ -102,6 +104,7 @@ class GammatoneFbank(torch.nn.Module):
         self.n_filts = n_filts
         self.scale = scale
         self.conversion_approach = conversion_approach
+        self.power = power
 
         self.preemphasize = torchaudio.transforms.Preemphasis(coeff=0.97)
         self.compute_STFT = STFT(
@@ -119,7 +122,8 @@ class GammatoneFbank(torch.nn.Module):
             low_freq=low_freq,
             high_freq=high_freq,
             scale=scale,
-            conversion_approach=conversion_approach
+            conversion_approach=conversion_approach,
+            width=width
         )
 
         self.register_buffer('fbank', torch.tensor(fbank[0], dtype=torch.float32))
@@ -135,7 +139,7 @@ class GammatoneFbank(torch.nn.Module):
         spec = self.compute_STFT(x).transpose(1, 2)
         spec = spectral_magnitude(spec)
         P = torch.matmul(spec.transpose(1, 2), self.fbank.T.to(x.device))
-        P = P ** 0.3
+        P = P ** self.power
         return P
 
 class DifferenceOfGammatoneFbank(GammatoneFbank):
@@ -150,7 +154,11 @@ class DifferenceOfGammatoneFbank(GammatoneFbank):
         scale='constant',
         conversion_approach='Glasberg',
         preemphasize: bool = True,
-        width_ratio: float = 1.25):
+        width: int = 1,
+        width_ratio: float = 1.25,
+        power: float = 0.3,
+        normalize_fbank: bool = True
+        ):
         super().__init__(
             sample_rate=sample_rate,
             n_fft=n_fft,
@@ -161,8 +169,10 @@ class DifferenceOfGammatoneFbank(GammatoneFbank):
             n_filts=n_filts,
             scale=scale,
             conversion_approach=conversion_approach,
-            normalize_fbank=True,
+            normalize_fbank=normalize_fbank,
             preemphasize=preemphasize,
+            width=width,
+            power=power
         )
         self.width_ratio = width_ratio
 
@@ -174,7 +184,7 @@ class DifferenceOfGammatoneFbank(GammatoneFbank):
             high_freq=high_freq,
             scale=scale,
             conversion_approach=conversion_approach,
-            width=width_ratio
+            width=width*width_ratio
         )
         fbank2 = torch.tensor(fbank2[0], dtype=torch.float32)
         fbank2 = fbank2 / fbank2.sum(1, keepdim=True)
@@ -182,12 +192,15 @@ class DifferenceOfGammatoneFbank(GammatoneFbank):
         self.fbank = self.fbank / torch.relu(self.fbank).sum(1, keepdim=True)
 
     def forward(self, x):
-        if self.preemphasize:
-            x = self.preemphasize(x)
-        spec = self.compute_STFT(x).transpose(1, 2)
-        spec = spectral_magnitude(spec)
+        if (x.dim() == 2) or (x.shape[1] == 1):
+            if self.preemphasize:
+                x = self.preemphasize(x)
+            spec = self.compute_STFT(x).transpose(1, 2)
+            spec = spectral_magnitude(spec)
+        else:
+            spec = x.transpose(1, 2)
         P = torch.matmul(spec.transpose(1, 2), self.fbank.T.to(x.device))
         P = torch.relu(P)
-        P = P ** 0.3
+        P = P ** self.power
         return P
         
